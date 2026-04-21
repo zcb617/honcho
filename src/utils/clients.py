@@ -2060,36 +2060,36 @@ async def honcho_llm_call_inner(
                     response: ChatCompletion = await client.chat.completions.parse(  # pyright: ignore
                         **openai_params
                     )
-                # Extract the parsed object for structured output
-                parsed_content = response.choices[0].message.parsed
-                if parsed_content is None:
-                    raise ValueError("No parsed content in structured response")
+                    # Extract the parsed object for structured output
+                    parsed_content = response.choices[0].message.parsed
+                    if parsed_content is None:
+                        raise ValueError("No parsed content in structured response")
 
-                usage = response.usage
-                finish_reason = response.choices[0].finish_reason
+                    usage = response.usage
+                    finish_reason = response.choices[0].finish_reason
 
-                # Validate that parsed content matches the response model
-                if not isinstance(parsed_content, response_model):
-                    raise ValueError(
-                        f"Parsed content does not match the response model: {parsed_content} != {response_model}"
-                    )
-
-                # Extract tool calls if present (though unlikely with structured output)
-                parsed_tool_calls: list[dict[str, Any]] = []
-                if (
-                    hasattr(response.choices[0].message, "tool_calls")
-                    and response.choices[0].message.tool_calls
-                ):
-                    for tool_call in response.choices[0].message.tool_calls:
-                        parsed_tool_calls.append(
-                            {
-                                "id": tool_call.id,
-                                "name": tool_call.function.name,
-                                "input": json.loads(tool_call.function.arguments)
-                                if tool_call.function.arguments
-                                else {},
-                            }
+                    # Validate that parsed content matches the response model
+                    if not isinstance(parsed_content, response_model):
+                        raise ValueError(
+                            f"Parsed content does not match the response model: {parsed_content} != {response_model}"
                         )
+
+                    # Extract tool calls if present (though unlikely with structured output)
+                    parsed_tool_calls: list[dict[str, Any]] = []
+                    if (
+                        hasattr(response.choices[0].message, "tool_calls")
+                        and response.choices[0].message.tool_calls
+                    ):
+                        for tool_call in response.choices[0].message.tool_calls:
+                            parsed_tool_calls.append(
+                                {
+                                    "id": tool_call.id,
+                                    "name": tool_call.function.name,
+                                    "input": json.loads(tool_call.function.arguments)
+                                    if tool_call.function.arguments
+                                    else {},
+                                }
+                            )
 
                 cache_creation, cache_read = extract_openai_cache_tokens(usage)
                 return HonchoLLMCallResponse(
