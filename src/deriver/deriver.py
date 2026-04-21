@@ -166,14 +166,38 @@ async def process_representation_tasks_batch(
         latest_message.session_name,
         latest_message.created_at,
     )
+    
+    # Debug logging for zero observations
+    explicit_count = len(response.content.explicit) if response.content else 0
+    logger.info(
+        "[DERIVER DEBUG] Message range %s:%s | LLM duration: %.0fms | Explicit count from LLM: %d | Explicit items: %s",
+        earliest_message.id,
+        latest_message.id,
+        llm_duration,
+        explicit_count,
+        str(response.content.explicit) if response.content and response.content.explicit else "[]"
+    )
 
     if observations.is_empty() or not message_ids:
+        reason = []
+        if not message_ids:
+            reason.append("no_message_ids")
+        if observations.is_empty():
+            reason.append("empty_observations")
+        if response.content and not response.content.explicit:
+            reason.append("llm_returned_empty_explicit")
+        if not response.content:
+            reason.append("no_response_content")
+            
         logger.warning(
-            "Deriver generated zero observations for messages %s:%s in %s/%s!",
+            "[DERIVER ZERO] messages %s:%s in %s/%s | Reasons: %s | LLM output tokens: %s | Prompt preview: %s",
             earliest_message.id,
             latest_message.id,
             latest_message.workspace_name,
             latest_message.session_name,
+            ",".join(reason) if reason else "unknown",
+            response.output_tokens if response else "N/A",
+            prompt[:200].replace("\n", " ") if prompt else "N/A"
         )
     else:
         # Save to all observer collections
