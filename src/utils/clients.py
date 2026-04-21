@@ -33,6 +33,50 @@ from src.utils.types import SupportedProviders, set_current_iteration
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_json_schema(schema: dict) -> dict:
+    """Resolve $ref references in JSON schema to inline definitions.
+    
+    Some custom providers (e.g., bailian/kimi) don't support $ref,
+    so we need to inline all referenced definitions.
+    """
+    if not isinstance(schema, dict):
+        return schema
+    
+    defs = schema.get("$defs", {})
+    
+    def _resolve(obj: dict) -> dict:
+        if not isinstance(obj, dict):
+            return obj
+        
+        # Handle $ref
+        if "$ref" in obj:
+            ref_path = obj["$ref"]
+            if ref_path.startswith("#/$defs/"):
+                def_name = ref_path.split("/")[-1]
+                if def_name in defs:
+                    resolved = _resolve(dict(defs[def_name]))
+                    return resolved
+        
+        # Recursively process all properties
+        result = {}
+        for key, value in obj.items():
+            if key == "$defs":
+                continue
+            if isinstance(value, dict):
+                result[key] = _resolve(value)
+            elif isinstance(value, list):
+                result[key] = [
+                    _resolve(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                result[key] = value
+        return result
+    
+    return _resolve(schema)
+
+
 # Gemini finish reasons that indicate the response was blocked by safety or policy
 # filters. When these occur, the response typically has no usable text content and
 # retrying with a backup provider is appropriate.
@@ -1988,10 +2032,34 @@ async def honcho_llm_call_inner(
                     thinking_content=extract_openai_reasoning_content(vllm_response),
                 )
             elif response_model:
-                openai_params["response_format"] = response_model
-                response: ChatCompletion = await client.chat.completions.parse(  # pyright: ignore
-                    **openai_params
-                )
+                # For custom providers, use inline schema without $ref
+                if provider == "custom":
+                    raw_schema = response_model.model_json_schema()
+                    inline_schema = resolve_json_schema(raw_schema)
+                    openai_params["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": response_model.__name__,
+                            "schema": inline_schema,
+                            "strict": False
+                        }
+                    }
+                    response = await client.chat.completions.create(**openai_params)
+                    content = response.choices[0].message.content or "{}"
+                    try:
+                        parsed_data = json.loads(content)
+                        parsed_content = response_model.model_validate(parsed_data)
+                    except (json.JSONDecodeError, ValidationError) as e:
+                        logger.warning(f"Failed to parse response from custom provider: {e}, content: {content[:200]}")
+                        parsed_content = response_model(explicit=[])
+                    usage = response.usage
+                    finish_reason = response.choices[0].finish_reason
+                    parsed_tool_calls: list[dict[str, Any]] = []
+                else:
+                    openai_params["response_format"] = response_model
+                    response: ChatCompletion = await client.chat.completions.parse(  # pyright: ignore
+                        **openai_params
+                    )
                 # Extract the parsed object for structured output
                 parsed_content = response.choices[0].message.parsed
                 if parsed_content is None:
