@@ -47,6 +47,7 @@ class LLMComponentSettings(Protocol):
     MODEL: str
     BACKUP_PROVIDER: SupportedProviders | None
     BACKUP_MODEL: str | None
+    MODEL_THINK: bool
 
 
 class TomlConfigSettingsSource(PydanticBaseSettingsSource):
@@ -258,6 +259,10 @@ class DeriverSettings(BackupLLMSettingsMixin, HonchoSettings):
     MAX_OUTPUT_TOKENS: Annotated[int, Field(default=4096, gt=0, le=100_000)] = 4096
     THINKING_BUDGET_TOKENS: Annotated[int, Field(default=1024, gt=0, le=5000)] = 1024
 
+    # Disable thinking mode for deriver - thinking wastes output tokens
+    # on a simple JSON extraction task with no benefit
+    MODEL_THINK: bool = False
+
     LOG_OBSERVATIONS: bool = False
 
     MAX_INPUT_TOKENS: Annotated[int, Field(default=23000, gt=0, le=23000)] = 23000
@@ -439,6 +444,8 @@ class SummarySettings(BackupLLMSettingsMixin, HonchoSettings):
     MAX_TOKENS_LONG: Annotated[int, Field(default=4000, gt=0, le=20_000)] = 4000
 
     THINKING_BUDGET_TOKENS: Annotated[int, Field(default=512, gt=0, le=2000)] = 512
+
+    MODEL_THINK: bool = True
 
 
 class WebhookSettings(HonchoSettings):

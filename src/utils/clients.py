@@ -679,6 +679,7 @@ async def _stream_final_response(
         None,  # No tools
         None,  # No tool_choice
         conversation_messages,
+        llm_settings=llm_settings,
     )
 
     # Yield chunks from the streaming response
@@ -810,6 +811,7 @@ async def _execute_tool_loop(
                 converted_tools,
                 effective_tool_choice,
                 conversation_messages,
+                llm_settings=llm_settings,
             )
 
         # Apply retry if enabled
@@ -890,7 +892,7 @@ async def _execute_tool_loop(
             return response
 
         # Determine which provider we're using (reuse the helper)
-        current_provider, _, _, _, _ = get_provider_and_model()
+        current_provider, current_model, _, _, _ = get_provider_and_model()
 
         # Add assistant message with tool calls to conversation
         assistant_message = _format_assistant_tool_message(
@@ -899,6 +901,8 @@ async def _execute_tool_loop(
             response.tool_calls_made,
             response.thinking_blocks,
             response.reasoning_details,
+            response.thinking_content,
+            current_model,
         )
         conversation_messages.append(assistant_message)
 
@@ -1044,6 +1048,7 @@ async def _execute_tool_loop(
             None,  # No tools
             None,  # No tool_choice
             conversation_messages,
+            llm_settings=llm_settings,
         )
 
     if enable_retry:
@@ -1076,6 +1081,8 @@ def _format_assistant_tool_message(
     tool_calls: list[dict[str, Any]],
     thinking_blocks: list[dict[str, Any]] | None = None,
     reasoning_details: list[dict[str, Any]] | None = None,
+    thinking_content: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """
     Format an assistant message with tool calls for a specific provider.
@@ -1086,6 +1093,8 @@ def _format_assistant_tool_message(
         tool_calls: List of tool call dicts with id, name, input keys
         thinking_blocks: Full thinking blocks with signatures for multi-turn replay (Anthropic only)
         reasoning_details: OpenRouter reasoning_details for Gemini models (must be preserved)
+        thinking_content: Reasoning content string for Kimi models (must be preserved for multi-turn tool use)
+        model: Model name, used to determine whether to inject reasoning_content (Kimi-only)
 
     Returns:
         Provider-formatted assistant message dict
@@ -1165,6 +1174,9 @@ def _format_assistant_tool_message(
         # Include reasoning_details for OpenRouter/Gemini (required for multi-turn tool use)
         if reasoning_details:
             msg["reasoning_details"] = reasoning_details
+        # Include reasoning_content for Kimi models (required for multi-turn tool use)
+        if thinking_content and model and "kimi" in model.lower():
+            msg["reasoning_content"] = thinking_content
         return msg
 
 
@@ -1488,6 +1500,7 @@ async def honcho_llm_call(
                 True,  # type: ignore[arg-type]
                 converted_tools,
                 tool_choice,
+                llm_settings=llm_settings,
             )
         else:
             return await honcho_llm_call_inner(
@@ -1505,6 +1518,7 @@ async def honcho_llm_call(
                 False,  # type: ignore[arg-type]
                 converted_tools,
                 tool_choice,
+                llm_settings=llm_settings,
             )
 
     decorated = _call_with_provider_selection
@@ -1689,6 +1703,7 @@ async def honcho_llm_call_inner(
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
     messages: list[dict[str, Any]] | None = None,
+    llm_settings: LLMComponentSettings | None = None,
 ) -> HonchoLLMCallResponse[Any] | AsyncIterator[HonchoLLMCallStreamChunk]:
     # has already been validated by honcho_llm_call
     client = CLIENTS[provider]
@@ -1933,6 +1948,14 @@ async def honcho_llm_call_inner(
             else:
                 openai_params["max_tokens"] = params["max_tokens"]
 
+            # Disable thinking mode if configured
+            # Use extra_body because the OpenAI SDK does not accept "thinking"
+            # as a top-level parameter; custom providers (e.g. Moonshot/Kimi)
+            # receive it via the request body instead.
+            if llm_settings and getattr(llm_settings, "MODEL_THINK", True) is False:
+                openai_params.setdefault("extra_body", {})
+                openai_params["extra_body"]["thinking"] = {"type": "disabled"}
+
             # Add tools if provided (not compatible with response_model for most cases)
             if tools and not response_model:
                 openai_params["tools"] = tools
@@ -2036,24 +2059,70 @@ async def honcho_llm_call_inner(
                 if provider == "custom":
                     raw_schema = response_model.model_json_schema()
                     inline_schema = resolve_json_schema(raw_schema)
-                    openai_params["response_format"] = {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": response_model.__name__,
-                            "schema": inline_schema,
-                            "strict": False
+
+                    # Kimi API does not support json_schema; use json_object + prompt injection
+                    if "kimi" in model.lower():
+                        openai_params["response_format"] = {"type": "json_object"}
+
+                        # Inject schema description into the last message
+                        # (Kimi requires prompt-level guidance since json_object has no schema)
+                        schema_desc = json.dumps(inline_schema, indent=2)
+                        last_msg = openai_params["messages"][-1]
+                        inject_text = (
+                            f"\n\nYou must respond with valid JSON matching this schema:\n"
+                            f"{schema_desc}\n"
+                            f"Do not include any markdown code blocks or explanatory text."
+                        )
+                        if isinstance(last_msg.get("content"), str):
+                            last_msg["content"] += inject_text
+                        elif isinstance(last_msg.get("content"), list):
+                            last_msg["content"].append({
+                                "type": "text",
+                                "text": inject_text
+                            })
+                    else:
+                        openai_params["response_format"] = {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": response_model.__name__,
+                                "schema": inline_schema,
+                                "strict": False
+                            }
                         }
-                    }
                     response = await client.chat.completions.create(**openai_params)
                     content = response.choices[0].message.content or "{}"
+                    _finish_reason = response.choices[0].finish_reason
+
+                    # DEBUG: Log raw response details for troubleshooting
+                    logger.info(
+                        "[CUSTOM PROVIDER DEBUG] model=%s finish_reason=%s content_len=%d content_preview=%s",
+                        model,
+                        _finish_reason,
+                        len(content),
+                        repr(content[:500]),
+                    )
+
                     try:
                         parsed_data = json.loads(content)
                         parsed_content = response_model.model_validate(parsed_data)
+                        logger.info(
+                            "[CUSTOM PROVIDER DEBUG] Parsed OK: explicit_count=%d",
+                            len(parsed_content.explicit) if hasattr(parsed_content, "explicit") else 0,
+                        )
                     except (json.JSONDecodeError, ValidationError) as e:
-                        logger.warning(f"Failed to parse response from custom provider: {e}, content: {content[:200]}")
+                        # Check if content contains think tags or other non-JSON
+                        has_think = "<think>" in content or "</think>" in content or "<thinking>" in content
+                        logger.warning(
+                            "[CUSTOM PROVIDER PARSE FAIL] model=%s error=%s finish_reason=%s has_think_tags=%s content_first_1k=%s",
+                            model,
+                            e,
+                            _finish_reason,
+                            has_think,
+                            repr(content[:1000]),
+                        )
                         parsed_content = response_model(explicit=[])
                     usage = response.usage
-                    finish_reason = response.choices[0].finish_reason
+                    finish_reason = _finish_reason
                     parsed_tool_calls: list[dict[str, Any]] = []
                 else:
                     openai_params["response_format"] = response_model
