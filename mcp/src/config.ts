@@ -16,11 +16,9 @@ export interface Env {
  * Parse configuration from request headers and Worker env bindings.
  * Throws on missing required fields so callers get clear errors.
  *
- * The Honcho API URL is read from the `HONCHO_API_URL` env var when set,
- * allowing operators to run this Worker alongside a self-hosted Honcho
- * instance (see the "Self-Hosted Honcho" section in README.md). It is
- * intentionally not exposed as a request header: routing public requests
- * to an internal URL would be a latency and security regression.
+ * The Honcho API URL defaults to the Worker-level `HONCHO_API_URL` binding.
+ * A caller can override it with `X-Honcho-Base-URL` when its MCP request
+ * needs to target a self-hosted Honcho instance.
  */
 export function parseConfig(request: Request, env: Env = {}): HonchoConfig {
   const authHeader = request.headers.get("Authorization");
@@ -47,7 +45,10 @@ export function parseConfig(request: Request, env: Env = {}): HonchoConfig {
     apiKey,
     userName,
     assistantName: request.headers.get("X-Honcho-Assistant-Name")?.trim() || "Assistant",
-    baseUrl: env.HONCHO_API_URL?.trim() || "https://api.honcho.dev",
+    baseUrl:
+      request.headers.get("X-Honcho-Base-URL")?.trim() ||
+      env.HONCHO_API_URL?.trim() ||
+      "https://api.honcho.dev",
     workspaceId: request.headers.get("X-Honcho-Workspace-ID")?.trim() || "default",
   };
 }
