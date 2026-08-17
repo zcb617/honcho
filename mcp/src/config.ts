@@ -10,6 +10,8 @@ export interface HonchoConfig {
 
 export interface Env {
   HONCHO_API_URL?: string;
+  /** Legacy name used by the existing container compose setup. */
+  HONCHO_BASE_URL?: string;
 }
 
 /**
@@ -17,8 +19,9 @@ export interface Env {
  * Throws on missing required fields so callers get clear errors.
  *
  * The Honcho API URL defaults to the Worker-level `HONCHO_API_URL` binding.
- * A caller can override it with `X-Honcho-Base-URL` when its MCP request
- * needs to target a self-hosted Honcho instance.
+ * `HONCHO_BASE_URL` remains supported for the existing compose setup. A
+ * caller can override either binding with `X-Honcho-Base-URL` when its MCP
+ * request needs to target a self-hosted Honcho instance.
  */
 export function parseConfig(request: Request, env: Env = {}): HonchoConfig {
   const authHeader = request.headers.get("Authorization");
@@ -48,6 +51,7 @@ export function parseConfig(request: Request, env: Env = {}): HonchoConfig {
     baseUrl:
       request.headers.get("X-Honcho-Base-URL")?.trim() ||
       env.HONCHO_API_URL?.trim() ||
+      env.HONCHO_BASE_URL?.trim() ||
       "https://api.honcho.dev",
     workspaceId: request.headers.get("X-Honcho-Workspace-ID")?.trim() || "default",
   };

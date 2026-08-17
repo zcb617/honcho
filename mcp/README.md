@@ -73,7 +73,9 @@ Built on:
 
 If you run Honcho yourself (for privacy, latency, or offline use), deploy the
 MCP Worker alongside your instance and set `HONCHO_API_URL` in its
-environment.
+environment. Existing compose setups that use `HONCHO_BASE_URL` remain
+supported. A client may also pass `X-Honcho-Base-URL` per request; this header
+takes precedence over either environment variable.
 
 **Local dev (`bun run dev`):** create `mcp/.dev.vars`:
 
