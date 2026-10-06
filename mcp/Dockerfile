@@ -1,4 +1,4 @@
-FROM oven/bun:1.2 AS bun
+FROM oven/bun:1.2.23 AS bun
 
 FROM node:24-slim
 
