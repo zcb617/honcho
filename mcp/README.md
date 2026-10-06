@@ -70,7 +70,10 @@ Built on:
 ## Self-Hosted Honcho
 
 If you run Honcho yourself, point this server at it with `HONCHO_API_URL`.
-When unset, requests go to `https://api.honcho.dev`.
+`HONCHO_BASE_URL` is the legacy alias for `HONCHO_API_URL` and is used when
+the newer variable is unset. For Worker requests, `X-Honcho-Base-URL` has the
+highest priority and can route an individual request to a self-hosted Honcho.
+When all of these are unset, requests go to `https://api.honcho.dev`.
 
 `HONCHO_TIMEOUT_MS` caps each Honcho API request (default 300000, 5 minutes).
 Raise it if `chat` runs longer than that on your model. A reverse proxy in

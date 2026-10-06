@@ -18,6 +18,9 @@ ENV UV_LINK_MODE=copy
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Configure the package index used by the builder stage dependency sync.
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
 # Copy only requirements to cache them in docker layer
 COPY uv.lock pyproject.toml /app/
 

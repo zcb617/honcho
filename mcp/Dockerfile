@@ -1,4 +1,4 @@
-FROM oven/bun:1.2
+FROM oven/bun:1.2.23
 
 WORKDIR /app
 
@@ -15,5 +15,6 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOST=0.0.0.0
+ENV HONCHO_BASE_URL=http://127.0.0.1:31111/v3
 
 CMD ["bun", "src/http.ts"]

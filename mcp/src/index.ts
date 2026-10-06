@@ -10,7 +10,7 @@ import { createServer } from "./server.js";
 const CORS_ORIGIN = "*";
 const CORS_METHODS = "GET, POST, DELETE, OPTIONS";
 const CORS_ALLOWED_HEADERS =
-  "Content-Type, Authorization, X-Honcho-Workspace-ID";
+  "Content-Type, Authorization, X-Honcho-Workspace-ID, X-Honcho-Base-URL";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": CORS_ORIGIN,
@@ -27,7 +27,11 @@ function resourceUrl(request: Request): string {
 }
 
 function authorizationServer(env: Env): string {
-  return env.HONCHO_API_URL?.trim() || "https://api.honcho.dev";
+  return (
+    env.HONCHO_API_URL?.trim() ||
+    env.HONCHO_BASE_URL?.trim() ||
+    "https://api.honcho.dev"
+  );
 }
 
 export default {

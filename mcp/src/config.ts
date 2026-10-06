@@ -39,6 +39,8 @@ export interface HonchoConfig {
 
 export interface Env {
   HONCHO_API_URL?: string;
+  /** Legacy alias for HONCHO_API_URL used by existing self-hosted deployments. */
+  HONCHO_BASE_URL?: string;
   HONCHO_TIMEOUT_MS?: string;
   ALERT_WEBHOOK_URL?: string;
 }
@@ -46,6 +48,8 @@ export interface Env {
 export interface EnvConfig {
   HONCHO_API_KEY?: string;
   HONCHO_API_URL?: string;
+  /** Legacy alias for HONCHO_API_URL used by existing self-hosted deployments. */
+  HONCHO_BASE_URL?: string;
   HONCHO_WORKSPACE_ID?: string;
   HONCHO_TIMEOUT_MS?: string;
 }
@@ -59,11 +63,9 @@ function parseTimeoutMs(value?: string): number | undefined {
  * Parse configuration from request headers and Worker env bindings.
  * Throws only when the Authorization bearer token is missing/empty.
  *
- * The Honcho API URL is read from the `HONCHO_API_URL` env var when set,
- * allowing operators to run this Worker alongside a self-hosted Honcho
- * instance (see the "Self-Hosted Honcho" section in README.md). It is
- * intentionally not exposed as a request header: routing public requests
- * to an internal URL would be a latency and security regression.
+ * The Honcho API URL uses the request `X-Honcho-Base-URL` header first, then
+ * `HONCHO_API_URL`, then the legacy `HONCHO_BASE_URL` binding, allowing
+ * operators to route requests to a self-hosted Honcho instance.
  *
  * Optional `X-Honcho-Workspace-ID` becomes the default `workspace_id` on
  * tools. If the header is omitted, each tool call must pass `workspace_id`.
@@ -86,7 +88,11 @@ export function parseConfig(request: Request, env: Env = {}): HonchoConfig {
 
   return {
     apiKey,
-    baseUrl: env.HONCHO_API_URL?.trim() || "https://api.honcho.dev",
+    baseUrl:
+      request.headers.get("X-Honcho-Base-URL")?.trim() ||
+      env.HONCHO_API_URL?.trim() ||
+      env.HONCHO_BASE_URL?.trim() ||
+      "https://api.honcho.dev",
     workspaceId,
     timeoutMs: parseTimeoutMs(env.HONCHO_TIMEOUT_MS),
   };
@@ -102,7 +108,10 @@ export function parseEnvConfig(env: EnvConfig): HonchoConfig {
   }
   return {
     apiKey,
-    baseUrl: env.HONCHO_API_URL?.trim() || "https://api.honcho.dev",
+    baseUrl:
+      env.HONCHO_API_URL?.trim() ||
+      env.HONCHO_BASE_URL?.trim() ||
+      "https://api.honcho.dev",
     workspaceId: env.HONCHO_WORKSPACE_ID?.trim() || undefined,
     timeoutMs: parseTimeoutMs(env.HONCHO_TIMEOUT_MS),
   };
